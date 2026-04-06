@@ -1,0 +1,56 @@
+name: Generate Encrypted Feed
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: generate
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    environment: production
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout public repo
+        uses: actions/checkout@v4
+
+      - name: Clone private repo
+        run: git clone https://x-access-token:"${{ secrets.BALKAM_PRIVATE_TOKEN }}"@github.com/cecavac/balkam-gen.git /tmp/balkam-gen
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml pycryptodome
+
+      - name: Run updater
+        run: python -m border_fetcher.main --skip-snapshots --silent
+        working-directory: /tmp/balkam-gen
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/balkam-gen/output/crossings.json.enc crossings.json.enc
+          git add crossings.json.enc
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "chore: Update data [skip ci]"
+            git push
+          fi
